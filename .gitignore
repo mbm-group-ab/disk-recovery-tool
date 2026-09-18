@@ -1,0 +1,7 @@
+build/
+*.img
+*.map
+__pycache__/
+*.spec
+dist/
+recovery_gui.build/
