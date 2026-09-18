@@ -3,6 +3,10 @@
 Custom recovery tool for a damaged 8TB disk (exFAT, scrambled sectors).
 Three stages, always run in this exact order.
 
+Landing page with download links: https://mbm-group-ab.github.io/disk-recovery-tool/
+(see [index.html](index.html), deployed by
+`.github/workflows/pages.yml` via GitHub Pages on every push to `main`).
+
 ## Build
 
 Dependencies installed via scoop: `cmake`, `mingw`.

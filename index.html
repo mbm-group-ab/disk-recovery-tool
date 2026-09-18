@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disk Recovery Tool — Rescue data off a failing drive. Free.</title>
+<meta name="description" content="A free, open-source toolchain (plus a cross-platform GUI) for imaging a failing/damaged disk and recovering exFAT files by parsing metadata directly, with signature carving as a fallback. Windows, macOS and Linux.">
+<link rel="icon" type="image/png" href="assets/icon-256.png">
+<style>
+  :root{
+    --bg:#0b0c10; --panel:#14161c; --panel-2:#1a1d25; --border:#262a35;
+    --text:#eef0f4; --muted:#9aa1b2; --accent:#38bdf8; --accent-2:#14b8a6;
+    --radius:16px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f7f7fb; --panel:#ffffff; --panel-2:#f1f2f8; --border:#e4e6ef; --text:#181a24; --muted:#5c6070; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",Inter,Arial,sans-serif;line-height:1.5}
+  a{color:inherit}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+
+  header{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .brand img{width:32px;height:32px;border-radius:8px}
+  nav a{color:var(--muted);text-decoration:none;margin-left:22px;font-size:14px}
+  nav a:hover{color:var(--text)}
+
+  .hero{padding:64px 0 40px;text-align:center}
+  .hero img{width:96px;height:96px;border-radius:22px;box-shadow:0 12px 40px rgba(56,189,248,.35)}
+  h1{font-size:clamp(28px,5vw,44px);margin:24px 0 12px;letter-spacing:-.02em}
+  h1 span{background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:18px;max-width:600px;margin:0 auto 32px}
+
+  .downloads{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:14px}
+  .dl-btn{
+    display:flex;align-items:center;gap:10px;padding:13px 22px;border-radius:12px;
+    background:var(--panel);border:1px solid var(--border);text-decoration:none;color:var(--text);
+    font-weight:600;font-size:15px;transition:.15s transform,.15s border-color;
+  }
+  .dl-btn:hover{transform:translateY(-2px);border-color:var(--accent)}
+  .dl-btn.primary{background:linear-gradient(90deg,var(--accent),#22d3ee);border-color:transparent;color:#04121a}
+  .dl-btn svg{width:20px;height:20px;flex:none}
+  .dl-note{color:var(--muted);font-size:13px}
+  .dl-note a{color:var(--accent-2);text-decoration:none}
+
+  .warn{max-width:640px;margin:24px auto 0;padding:14px 18px;border-radius:12px;background:rgba(248,113,113,.08);
+    border:1px solid rgba(248,113,113,.3);color:#fca5a5;font-size:13px;text-align:left}
+
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:56px 0}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:22px}
+  .card .ic{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;background:var(--panel-2)}
+  .card .ic svg{width:20px;height:20px;color:var(--accent)}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--muted);font-size:14px}
+
+  .steps{counter-reset:step;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:16px 0 56px}
+  .step{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+  .step::before{counter-increment:step;content:counter(step);display:inline-flex;align-items:center;justify-content:center;
+    width:26px;height:26px;border-radius:50%;background:var(--accent);color:#04121a;font-size:13px;font-weight:700;margin-bottom:10px}
+  .step h4{margin:0 0 4px;font-size:15px}
+  .step p{margin:0;color:var(--muted);font-size:13px}
+
+  footer{border-top:1px solid var(--border);padding:28px 0 40px;color:var(--muted);font-size:13px;
+    display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center}
+  footer a{color:var(--muted);text-decoration:none}
+  footer a:hover{color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><img src="assets/icon-256.png" alt=""> Disk Recovery Tool</div>
+    <nav>
+      <a href="#download">Download</a>
+      <a href="#features">Toolchain</a>
+      <a href="https://github.com/mbm-group-ab/disk-recovery-tool">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <img src="assets/icon-256.png" alt="Disk Recovery Tool icon">
+    <h1>Rescue data off a<br><span>failing drive</span>. Free.</h1>
+    <p class="sub">A free, open-source toolchain for imaging a damaged/failing disk sector by
+      sector, then recovering exFAT files by parsing filesystem metadata directly — with
+      signature-based carving as a fallback for what metadata recovery can't rebuild. A
+      graphical front-end wraps all of it for Windows, macOS and Linux.</p>
+
+    <div class="downloads" id="download">
+      <a class="dl-btn primary" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-windows.exe">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zm0 13L10.5 19.6v-7.1H3zm8.4-13.8L21 3.3v8.2h-9.6zm0 8.9H21v8.2l-9.6-1.3z"/></svg>
+        Download for Windows
+      </a>
+      <a class="dl-btn" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-macos">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.1 2.5-1.8 3-.5 7.5 1.2 10 .9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.2-1.2 3.1-2.5.7-1 1.1-2 1.4-3-1.7-.7-3.8-2.1-3.8-4.7zM14.6 4.5c.7-.9 1.2-2.1 1.1-3.4-1 0-2.4.7-3.1 1.6-.7.8-1.3 2-1.1 3.3 1.2.1 2.4-.6 3.1-1.5z"/></svg>
+        Download for macOS
+      </a>
+      <a class="dl-btn" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-linux">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-1.2 0-2 1.4-2 3.2 0 1.1.4 1.9.7 2.6-1 .5-2.6 1.6-3.4 3.4-.6 1.3-.6 2.6-1.5 3.1-.7.4-1 1-.8 1.6.2.6.9.8 1.6.7-.1.6 0 1.2.5 1.6.7.6 1.8.5 2.4-.1.6.5 1.6.9 2.5.9s1.9-.4 2.5-.9c.6.6 1.7.7 2.4.1.5-.4.6-1 .5-1.6.7.1 1.4-.1 1.6-.7.2-.6-.1-1.2-.8-1.6-.9-.5-.9-1.8-1.5-3.1-.8-1.8-2.4-2.9-3.4-3.4.3-.7.7-1.5.7-2.6C14 3.4 13.2 2 12 2z"/></svg>
+        Download for Linux
+      </a>
+    </div>
+    <p class="dl-note">Portable, single-file executables — nothing to install.
+      All builds and source: <a href="https://github.com/mbm-group-ab/disk-recovery-tool/releases">Releases</a> · <a href="https://github.com/mbm-group-ab/disk-recovery-tool">Source on GitHub</a></p>
+
+    <div class="warn">Raw physical-drive imaging (<code>\\.\PhysicalDriveN</code>) only works on
+      Windows today — the imager talks to the Win32 device API directly. macOS/Linux builds of
+      the GUI can still scan/recover/carve from an image file (<code>.img</code>/<code>.rci</code>)
+      produced elsewhere.</div>
+  </section>
+
+  <section id="features" class="features">
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg></div>
+      <h3>1. Imager</h3>
+      <p>Sector-by-sector copy with retries, bad-sector skipping, and resume — splits across
+        multiple destination disks when none of them alone can hold the source.</p>
+    </div>
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6l3 3v15H6V6z"/><path d="M9 3v5H4"/></svg></div>
+      <h3>2. exFAT recovery</h3>
+      <p>Walks the exFAT boot sector, FAT, and directory entries directly to recover files with
+        their <em>original</em> names and folder structure — including deleted files.</p>
+    </div>
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+      <h3>3. Carver</h3>
+      <p>Signature-based fallback for data whose directory entry is gone: finds known file
+        headers in whatever region metadata recovery couldn't claim.</p>
+    </div>
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+      <h3>Rescue map</h3>
+      <p>Every read is tracked as good/bad/unknown in a durable, checksummed map, so a file is
+        only ever reported complete if every byte of it was actually read.</p>
+    </div>
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg></div>
+      <h3>Scan before you copy</h3>
+      <p>A metadata-only scan writes a filterable plan (by extension, path, size, date) so you
+        can recover exactly what you need when the destination is smaller than the source.</p>
+    </div>
+    <div class="card">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 4 8 9 9 5-1 9-4 9-9V7z"/></svg></div>
+      <h3>100% local &amp; free</h3>
+      <p>Open source. Nothing leaves your machine — no cloud upload, no telemetry, no cost.</p>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="step"><h4>1. Image</h4><p>Run the imager against the failing drive first — never work directly on the source.</p></div>
+    <div class="step"><h4>2. Scan &amp; recover</h4><p>Scan the image, filter what you need, then recover it with original names and folders.</p></div>
+    <div class="step"><h4>3. Carve the rest</h4><p>Run the carver over whatever region recovery couldn't claim, as a last resort.</p></div>
+  </section>
+
+  <footer>
+    <span>© 2026 Disk Recovery Tool</span>
+    <span><a href="https://github.com/mbm-group-ab/disk-recovery-tool">GitHub</a> · <a href="https://github.com/mbm-group-ab/disk-recovery-tool/releases">Releases</a> · <a href="https://github.com/mbm-group-ab/disk-recovery-tool/issues">Report an issue</a></span>
+  </footer>
+</div>
+
+</body>
+</html>
