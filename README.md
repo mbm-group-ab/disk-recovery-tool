@@ -42,9 +42,10 @@ you already produced elsewhere, and is useful for scanning/recovering from
 a copied image.
 
 Windows/macOS/Linux builds are produced automatically by
-`.github/workflows/build-gui.yml` (PyInstaller) on every push to `main`
-(auto-tagged) and attached to a GitHub Release, so anyone can `git clone`
-or just download the executable for their OS.
+`.github/workflows/release.yml` (PyInstaller) on every push to `main` — it
+bumps a patch version tag and attaches all three executables to that
+GitHub Release in one workflow run, so anyone can `git clone` or just
+download the executable for their OS.
 
 ## Guided menu (`recover.ps1`)
 
