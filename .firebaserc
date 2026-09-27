@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mbm-group-ab"
+  },
+  "targets": {
+    "mbm-group-ab": {
+      "hosting": {
+        "disk-recovery-tool": [
+          "disk-recovery-tool"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

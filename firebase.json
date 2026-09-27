@@ -1,0 +1,28 @@
+{
+  "hosting": {
+    "site": "disk-recovery-tool",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "build/**",
+      "__pycache__/**",
+      "capacity-probe/**",
+      "carver/**",
+      "common/**",
+      "exfat-parser/**",
+      "imager/**",
+      "map-tool/**",
+      "orchestrator/**",
+      "rescue/**",
+      "tests/**",
+      "docs/**",
+      "*.py",
+      "*.ps1",
+      "*.md",
+      "CMakeLists.txt",
+      "CNAME"
+    ]
+  }
+}
