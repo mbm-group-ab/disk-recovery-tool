@@ -11,12 +11,15 @@ on:
       - ".firebaserc"
       - ".github/workflows/deploy-firebase.yml"
   workflow_dispatch:
+  repository_dispatch:
+    types: [deploy]
 
 permissions:
   contents: read
 
 jobs:
   deploy:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -34,3 +37,11 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: npx firebase-tools deploy --only hosting:disk-recovery-tool --project mbm-group-ab --non-interactive
+
+  # A push only runs the checks. The hub sees this run finish and asks the owner in
+  # MBM Control (@MBM_HUB_BOT); "Deploy" there sends repository_dispatch (type deploy).
+  await-approval:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "The deploy waits for the owner's OK in MBM Control."
