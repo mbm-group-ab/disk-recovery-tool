@@ -5,7 +5,9 @@ Three stages, always run in this exact order.
 
 Landing page with download links: https://disk-recovery-tool.mbm-group.se/
 (see [index.html](index.html), deployed by
-`.github/workflows/pages.yml` via GitHub Pages on every push to `main`).
+`.github/workflows/deploy-firebase.yml` to Firebase Hosting, site
+`disk-recovery-tool` in project `mbm-group-ab`; a push to `main` waits for
+the owner's OK in MBM Control before it deploys).
 
 ## Build
 
