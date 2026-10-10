@@ -1,0 +1,58 @@
+name: Deploy to VPS
+
+# The site is served by the `static-sites` nginx container on the VPS
+# (deploy/static-sites in the company-site repo). This workflow only copies files.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  repository_dispatch:
+    types: [deploy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  SITE: disk-recovery-tool
+  SITE_URL: https://disk-recovery-tool.mbm-group.se/
+
+jobs:
+  deploy:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Copy the site to the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null "$RUNNER_TEMP/key"
+          printf '%s\n' "$VPS_SSH_KEY" > "$RUNNER_TEMP/key"
+          SSH="ssh -i $RUNNER_TEMP/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $VPS_USER@$VPS_HOST"
+          # Not published: dot files, docs, build scripts, sources, deploy config.
+          SKIP='(^|/)\.|(^|/)(firebase\.json|CLAUDE\.md|LICENSE|CMakeLists\.txt|update-site\.ps1|Dockerfile|docker-compose\.yml)$|\.(md|ps1|py|spec)$|^deploy/'
+          git ls-files | grep -Ev "$SKIP" > "$RUNNER_TEMP/files"
+          $SSH "rm -rf ~/static-sites/sites/$SITE.new && mkdir -p ~/static-sites/sites/$SITE.new"
+          tar -cf - -T "$RUNNER_TEMP/files" | $SSH "tar -C ~/static-sites/sites/$SITE.new -xf -"
+          $SSH "cd ~/static-sites/sites && rm -rf $SITE.old && { [ -d $SITE ] && mv $SITE $SITE.old || true; } && mv $SITE.new $SITE && rm -rf $SITE.old && chmod -R a+rX $SITE"
+
+      - name: Check the live site
+        run: curl -fsS --retry 5 --retry-delay 3 -o /dev/null "$SITE_URL"
+
+  # A push only runs the checks. The hub sees this run finish and asks the owner in
+  # MBM Control (@MBM_HUB_BOT); "Deploy" there sends repository_dispatch (type deploy).
+  await-approval:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "The deploy waits for the owner's OK in MBM Control."

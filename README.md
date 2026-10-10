@@ -4,10 +4,8 @@ Custom recovery tool for a damaged 8TB disk (exFAT, scrambled sectors).
 Three stages, always run in this exact order.
 
 Landing page with download links: https://disk-recovery-tool.mbm-group.se/
-(see [index.html](index.html), deployed by
-`.github/workflows/deploy-firebase.yml` to Firebase Hosting, site
-`disk-recovery-tool` in project `mbm-group-ab`; a push to `main` waits for
-the owner's OK in MBM Control before it deploys).
+(see [index.html](index.html), served from the VPS by the `static-sites` container;
+`.github/workflows/deploy-vps.yml` copies it there after the owner's OK in MBM Control).
 
 ## Build
 
@@ -198,9 +196,18 @@ a failing bridge wiped it), its files are still on disk but nothing points at
 them. The parser can find such directories by their entry-set signature:
 
 ```
-exfat_recovery.exe D:escue\disk.img --find-lost-dirs D:escue\lost-dirs.txt
-exfat_recovery.exe D:escue\disk.img --scan D:escue\plan.csv --lost-dirs D:escue\lost-dirs.txt
-exfat_recovery.exe D:escue\disk.img D:ecovered --from-plan D:escue\plan.csv --lost-dirs D:escue\lost-dirs.txt
+exfat_recovery.exe D:
+escue\disk.img --find-lost-dirs D:
+escue\lost-dirs.txt
+exfat_recovery.exe D:
+escue\disk.img --scan D:
+escue\plan.csv --lost-dirs D:
+escue\lost-dirs.txt
+exfat_recovery.exe D:
+escue\disk.img D:
+ecovered --from-plan D:
+escue\plan.csv --lost-dirs D:
+escue\lost-dirs.txt
 ```
 
 The search reads one sector per allocated cluster (add `--all-clusters` when the
@@ -219,8 +226,11 @@ files there come back zero-filled. Find the boundary (`capacity_probe.exe`, or
 sample reads at increasing offsets) and pass it to the parser:
 
 ```
-exfat_recovery.exe \.\PhysicalDriveN --scan D:escue\plan.csv --real-capacity 48G
-exfat_recovery.exe \.\PhysicalDriveN D:ecovered --from-plan D:escue\plan.csv --real-capacity 48G
+exfat_recovery.exe \.\PhysicalDriveN --scan D:
+escue\plan.csv --real-capacity 48G
+exfat_recovery.exe \.\PhysicalDriveN D:
+ecovered --from-plan D:
+escue\plan.csv --real-capacity 48G
 ```
 
 Files whose data lies entirely at or beyond the limit are reported as
