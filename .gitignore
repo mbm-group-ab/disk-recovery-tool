@@ -6,3 +6,7 @@ __pycache__/
 dist/
 recovery_gui.build/
 .firebase/
+
+# Secrets (checkup 2026-11-14)
+.env*
+!.env.example
