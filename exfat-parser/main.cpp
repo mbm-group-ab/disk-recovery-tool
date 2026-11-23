@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "operation_lock.h"
 #include "rescue_map.h"
 #include "random_access_reader.h"
 #include "sha256.h"
@@ -1754,6 +1755,7 @@ int main(int argc, char** argv) {
         vol.rescue_map = rescue_map.get();
     }
 
+    std::vector<std::unique_ptr<recovery::OperationLock>> output_locks;
     for (auto& d : destinations) {
         std::error_code ec;
         recovery::CreateDirectoriesWin32(d.root, ec);
@@ -1761,6 +1763,18 @@ int main(int argc, char** argv) {
             fprintf(stderr, "cannot create output directory %s\n", d.label.c_str());
             return 1;
         }
+        auto lock = std::make_unique<recovery::OperationLock>();
+        if (!lock->Acquire(d.root / ".recovery.lock", "exfat-parser")) {
+            if (lock->Busy()) {
+                fprintf(stderr, "busy: another run is writing to %s; nothing was written\n",
+                        d.label.c_str());
+                return recovery::kExitBusy;
+            }
+            fprintf(stderr, "could not create the output lock in %s, error %lu\n",
+                    d.label.c_str(), static_cast<unsigned long>(lock->LastError()));
+            return 1;
+        }
+        output_locks.push_back(std::move(lock));
     }
 
     const fs::path absolute_image_path = recovery::FullPathWin32(image_path);

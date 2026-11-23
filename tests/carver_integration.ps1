@@ -168,6 +168,25 @@ try {
         (Get-Content -LiteralPath (Join-Path $partialOutput 'carve_manifest.csv') -Raw) -notmatch 'partial,1') {
         throw 'explicit partial carving did not record map provenance'
     }
+
+    # Operation lock: a second writer on the same output folder stops with 9 and writes nothing.
+    $lockedOutput = Join-Path $testRoot 'locked'
+    New-Item -ItemType Directory -Force -Path $lockedOutput | Out-Null
+    $holder = [IO.File]::Open((Join-Path $lockedOutput '.recovery.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        & $Carver $image $lockedOutput --whole-image --max-output 1000 | Out-Host
+        if ($LASTEXITCODE -ne 9) { throw "carver on a locked output gave exit $LASTEXITCODE, expected 9" }
+        if (@(Get-ChildItem -LiteralPath $lockedOutput -File).Count -ne 1) {
+            throw 'carver wrote into a locked output folder'
+        }
+    }
+    finally { $holder.Dispose() }
+    Remove-Item -LiteralPath (Join-Path $lockedOutput '.recovery.lock') -Force
+    & $Carver $image $lockedOutput --whole-image --max-output 1000 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "carver after the lock was released exited $LASTEXITCODE" }
+    if (Test-Path -LiteralPath (Join-Path $lockedOutput '.recovery.lock')) {
+        throw 'carver left its lock file behind'
+    }
 }
 finally {
     if ($null -ne $stream) { try { $stream.Dispose() } catch {} }

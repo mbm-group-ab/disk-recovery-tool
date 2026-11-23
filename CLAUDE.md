@@ -34,7 +34,11 @@ Every change to a tool needs a test in `tests/` (C++ unit tests or the `*_integr
 - Imager exit codes are part of the GUI contract (3 low space, 4 unresponsive, 5 stop requested via
   `<dest>.stop`, 6 refused existing image/map/report, 7 refused resume of another source (fingerprint or
   rescued-sample mismatch; `--allow-new-source-id` only skips the fingerprint), 8 refused destination on the source
-  disk). The test build fakes disk numbers with `IMAGER_TEST_SOURCE_DISK` / `IMAGER_TEST_DEST_DISK`. GUI texts live in `gui_i18n.py` (EN/SV/FA, keys checked
+  disk, 9 busy: another run holds `<dest>.lock`; carver/parser also return 9 on a held `<output>\.recovery.lock`).
+  The test build fakes disk numbers with `IMAGER_TEST_SOURCE_DISK` / `IMAGER_TEST_DEST_DISK` and injects faults with
+  `IMAGER_TEST_FAIL_WRITE_AFTER` / `IMAGER_TEST_CHECKPOINT_BYTES` (never compiled into the release imager). The map is
+  saved right after the destination opens; keep it that way (a crash before the first checkpoint must stay resumable).
+  `tests/fuzz_tests.cpp` (fixed seed) covers map and `.rci` loading; extend it when a loader changes. GUI texts live in `gui_i18n.py` (EN/SV/FA, keys checked
   by `tests/gui_contract_test.py`); command lines come only from the `build_*_args` functions.
 - `deploy-vps.yml`: copies the landing page to the VPS `static-sites` container
   (`disk-recovery-tool.mbm-group.se`). A push runs the checks; the deploy waits for the owner's 🚀 in MBM Control.

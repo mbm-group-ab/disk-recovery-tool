@@ -35,7 +35,17 @@ set_target_properties(imager_file_test_runner PROPERTIES OUTPUT_NAME image_copy_
 if(MINGW)
     target_link_options(imager_file_test_runner PRIVATE -municode)
 endif()
+add_executable(fuzz_tests
+    fuzz_tests.cpp
+    ../common/rescue_map.cpp
+    ../common/chunked_image_writer.cpp
+    ../common/random_access_reader.cpp
+    ../common/sha256.cpp
+)
+target_include_directories(fuzz_tests PRIVATE ../common)
+target_link_libraries(fuzz_tests PRIVATE bcrypt)
 add_test(NAME rescue_map_tests COMMAND rescue_map_tests)
+add_test(NAME fuzz_tests COMMAND fuzz_tests)
 add_test(NAME chunk_store_tests COMMAND chunk_store_tests)
 add_test(NAME exfat_parser_integration
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
@@ -61,6 +71,6 @@ if(Python3_FOUND)
 endif()
 if(MINGW)
     get_filename_component(MINGW_RUNTIME_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set_tests_properties(rescue_map_tests chunk_store_tests exfat_parser_integration imager_integration carver_integration map_tool_integration PROPERTIES
+    set_tests_properties(rescue_map_tests fuzz_tests chunk_store_tests exfat_parser_integration imager_integration carver_integration map_tool_integration PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${MINGW_RUNTIME_DIR}")
 endif()

@@ -99,7 +99,7 @@ def test_binaries(carver, imager, root):
           "imager rerun without resume should be refused (6), got %d" % rc)
     rc, out = run(imager, gui.build_imager_args(image, dest, resume=True) + ["--sector", "512"])
     check(rc == 0, "imager resume via GUI args exited %d: %s" % (rc, out[-400:]))
-    for code in (7, 8):
+    for code in (7, 8, 9):
         key = gui.IMAGER_EXIT_MEANING.get(code)
         check(key == "exit_%d" % code, "imager exit %d has no GUI meaning" % code)
 

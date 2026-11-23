@@ -201,6 +201,67 @@ try {
         throw 'multi-part chunk index did not reconstruct cross-part source reads'
     }
 
+    # DR6 parser fuzz: damaged boot sectors, FATs and directories (including FAT loops) on copies
+    # of the healthy image must end with a defined exit code, never a crash or a hang. Runs in its
+    # own scope so its variables never leak into the checks below.
+    & {
+    $healthy = [IO.File]::ReadAllBytes($image)
+    $volume = 1MB
+    $sectorShift = $healthy[$volume + 108]
+    $clusterShift = $healthy[$volume + 109]
+    $fatOffset = [BitConverter]::ToUInt32($healthy, $volume + 80) * [int64](1 -shl $sectorShift)
+    $fatLength = [BitConverter]::ToUInt32($healthy, $volume + 84) * [int64](1 -shl $sectorShift)
+    $heapOffset = [BitConverter]::ToUInt32($healthy, $volume + 88) * [int64](1 -shl $sectorShift)
+    $rootCluster = [BitConverter]::ToUInt32($healthy, $volume + 96)
+    $clusterBytes = [int64](1 -shl ($sectorShift + $clusterShift))
+    $rootOffset = $volume + $heapOffset + ($rootCluster - 2) * $clusterBytes
+    $regions = @(
+        @{ Start = $volume; Length = 512 },
+        @{ Start = $volume + $fatOffset; Length = [Math]::Min($fatLength, 4096) },
+        @{ Start = $rootOffset; Length = [Math]::Min($clusterBytes, 4096) }
+    )
+    $fuzzImage = Join-Path $testRoot 'fuzz.img'
+    $fuzzPlan = Join-Path $testRoot 'fuzz-plan.csv'
+    $fuzzOut = Join-Path $testRoot 'fuzz-out.txt'
+    $fuzzErr = Join-Path $testRoot 'fuzz-err.txt'
+    $rng = [Random]::new(20261123)
+    $cases = 36
+    for ($case = 0; $case -lt $cases; ++$case) {
+        $bytes = [byte[]]$healthy.Clone()
+        if ($case -eq 0) {
+            # The root directory's FAT entry points at itself: an endless chain.
+            [BitConverter]::GetBytes([uint32]$rootCluster).CopyTo($bytes, $volume + $fatOffset + 4 * $rootCluster)
+        } elseif ($case -eq 1) {
+            # Two clusters pointing at each other.
+            $a = $rootCluster + 1; $b = $rootCluster + 2
+            [BitConverter]::GetBytes([uint32]$b).CopyTo($bytes, $volume + $fatOffset + 4 * $a)
+            [BitConverter]::GetBytes([uint32]$a).CopyTo($bytes, $volume + $fatOffset + 4 * $b)
+            [BitConverter]::GetBytes([uint32]$a).CopyTo($bytes, $volume + $fatOffset + 4 * $rootCluster)
+        } else {
+            $region = $regions[$case % $regions.Count]
+            $flips = 1 + $rng.Next(24)
+            for ($f = 0; $f -lt $flips; ++$f) {
+                $bytes[$region.Start + $rng.Next([int]$region.Length)] = [byte]$rng.Next(256)
+            }
+        }
+        [IO.File]::WriteAllBytes($fuzzImage, $bytes)
+        Remove-Item -LiteralPath $fuzzPlan -Force -ErrorAction SilentlyContinue
+        $process = Start-Process -FilePath $Parser -ArgumentList @("`"$fuzzImage`"", '--scan', "`"$fuzzPlan`"") `
+            -NoNewWindow -PassThru -RedirectStandardOutput $fuzzOut -RedirectStandardError $fuzzErr
+        $null = $process.Handle  # PowerShell 5.1 loses ExitCode unless the handle is cached
+        if (-not $process.WaitForExit(20000)) {
+            $process.Kill()
+            throw "parser fuzz case $case hung (seed 20261123)"
+        }
+        $process.WaitForExit()
+        $code = $process.ExitCode
+        if ($code -lt 0 -or $code -gt 255) {
+            throw ("parser fuzz case {0} crashed with exit 0x{1:X8} (seed 20261123)" -f $case, $code)
+        }
+    }
+    Write-Host "parser fuzz: $cases damaged images, no crash or hang"
+    }
+
     & $Parser $image --scan $plan | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "scan exited $LASTEXITCODE" }
     if ((Get-Content -LiteralPath $plan -Raw) -notmatch 'test\.txt.*,8,0,planned-complete.*1061888:5') {
@@ -385,6 +446,19 @@ try {
     if ((Get-Content -LiteralPath (Join-Path $capacityOutput 'manifest.csv') -Raw) -notmatch 'clone\.txt",8,0,beyond-device-capacity') {
         throw 'recovery manifest does not report beyond-device-capacity'
     }
+
+    # Operation lock: a second writer on the same output folder stops with 9 and writes nothing.
+    $lockedOutput = Join-Path $testRoot 'locked-output'
+    New-Item -ItemType Directory -Force -Path $lockedOutput | Out-Null
+    $holder = [IO.File]::Open((Join-Path $lockedOutput '.recovery.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        & $Parser $image $lockedOutput --from-plan $plan | Out-Host
+        if ($LASTEXITCODE -ne 9) { throw "parser on a locked output gave exit $LASTEXITCODE, expected 9" }
+        if (@(Get-ChildItem -LiteralPath $lockedOutput -Recurse -File).Count -ne 1) {
+            throw 'parser wrote into a locked output folder'
+        }
+    }
+    finally { $holder.Dispose() }
 }
 finally {
     if ($null -ne $writer) { try { $writer.Dispose() } catch {} }

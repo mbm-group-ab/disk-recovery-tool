@@ -45,7 +45,20 @@ answering, 5 stop requested, 6 refused because the image, its map or its
 report already exists (a run without `--resume` never replaces them; move or
 rename them first, or pass `--resume`), 7 refused to resume because the source
 is not the one the image was made from, 8 refused because the destination is
-on the source's own disk. Nothing is written in cases 6, 7 and 8.
+on the source's own disk, 9 busy because another run (another GUI window or
+a command line) is using the same image. Nothing is written in cases 6 to 9.
+The carver and the exFAT parser also stop with 9 when another run is writing
+to the same output folder.
+
+**One run per output:** the imager holds `<image>.lock`, the carver and the
+parser hold `<output>\.recovery.lock` while they run. Windows deletes the lock
+file when the process ends, even after a crash, so a stale lock never blocks a
+later run.
+
+**Crash safety:** the map is written the moment the image file is created and
+then at every checkpoint (atomically, with a `.bak` of the last good one), and
+it never marks a range rescued before its data is flushed. A crash, power loss
+or full disk at any point leaves an image that `--resume` continues.
 
 **Resume safety:** the map records what the source is (disk vendor/product/
 serial, or volume serial + file id for an image file). On `--resume` the imager
@@ -69,7 +82,13 @@ on macOS/Linux but the engine is not built or supported there.
 
 The tests include `tests/gui_contract_test.py`, which runs the GUI's command
 builders against the real `recovery_carver` and imager binaries on a
-synthetic image (`ctest` runs it when Python is found).
+synthetic image (`ctest` runs it when Python is found). DR6 fault tests use
+hooks that exist only in the test build of the imager (`IMAGER_TEST_FAIL_WRITE_AFTER`
+makes the destination "fill up" after N bytes, `IMAGER_TEST_CHECKPOINT_BYTES`
+checkpoints more often), and `fuzz_tests` feeds mutated rescue maps and chunk
+indexes to the loaders with a fixed seed (`FUZZ_SEED`, `FUZZ_ROUNDS` to dig deeper).
+The parser test also scans 36 damaged copies of the synthetic volume (broken boot
+sector, FAT, directory, FAT loops) and fails on any crash or hang.
 
 ## Guided menu (`recover.ps1`)
 

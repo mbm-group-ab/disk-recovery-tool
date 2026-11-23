@@ -232,6 +232,59 @@ try {
         Remove-Item Env:IMAGER_TEST_SOURCE_DISK -ErrorAction SilentlyContinue
         Remove-Item Env:IMAGER_TEST_DEST_DISK -ErrorAction SilentlyContinue
     }
+    if (Test-Path -LiteralPath "$sameDisk.lock") { throw 'imager left its lock file behind' }
+
+    # Operation lock: a second run on the same image (new or --resume) stops with 9.
+    $lockedImage = Join-Path $testRoot 'locked.img'
+    $holder = [IO.File]::Open("$lockedImage.lock", 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        & $Imager $idSource $lockedImage --sector 512 | Out-Host
+        if ($LASTEXITCODE -ne 9) { throw "imager on a locked image gave exit $LASTEXITCODE, expected 9" }
+        if ((Test-Path -LiteralPath $lockedImage) -or (Test-Path -LiteralPath "$lockedImage.map")) {
+            throw 'imager wrote while another run held the lock'
+        }
+    }
+    finally { $holder.Dispose() }
+    $holder = [IO.File]::Open("$idImage.lock", 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        & $Imager $idSource $idImage --resume --sector 512 --allow-new-source-id | Out-Host
+        if ($LASTEXITCODE -ne 9) { throw "resume on a locked image gave exit $LASTEXITCODE, expected 9" }
+        if ((Get-Sha256 $idImage) -ne $idImageHash) { throw 'busy resume modified the image' }
+    }
+    finally { $holder.Dispose() }
+
+    # DR6 fault injection: the destination fills up mid-run (test build hook). The map must
+    # exist, never claim bytes that were not written, and --resume must finish a correct image.
+    foreach ($case in @(@{ Name = 'before-checkpoint'; Checkpoint = '' },
+                        @{ Name = 'after-checkpoints'; Checkpoint = '65536' })) {
+        $faultImage = Join-Path $testRoot "fault-$($case.Name).img"
+        $env:IMAGER_TEST_FAIL_WRITE_AFTER = '300000'
+        if ($case.Checkpoint) { $env:IMAGER_TEST_CHECKPOINT_BYTES = $case.Checkpoint }
+        try {
+            & $Imager $idSource $faultImage --sector 512 --read-size 32K --min-read-size 4K | Out-Host
+            if ($LASTEXITCODE -ne 1) { throw "$($case.Name): full destination gave exit $LASTEXITCODE, expected 1" }
+        }
+        finally {
+            Remove-Item Env:IMAGER_TEST_FAIL_WRITE_AFTER -ErrorAction SilentlyContinue
+            Remove-Item Env:IMAGER_TEST_CHECKPOINT_BYTES -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path -LiteralPath "$faultImage.map")) { throw "$($case.Name): no map after the fault" }
+        $claimed = 0
+        foreach ($line in [IO.File]::ReadAllLines("$faultImage.map")) {
+            if ($line -match '^(\d+) (\d+) \+$') { $claimed += [int64]$Matches[2] }
+        }
+        if ($claimed -gt 300000) { throw "$($case.Name): map claims $claimed bytes, more than were written" }
+        if ($case.Checkpoint -and $claimed -eq 0) { throw "$($case.Name): no checkpoint was taken before the fault" }
+        if ($claimed -gt 0) {
+            $imageBytes = [IO.File]::ReadAllBytes($faultImage)
+            for ($i = 0; $i -lt $claimed; $i += 4096) {
+                if ($imageBytes[$i] -ne $changed[$i]) { throw "$($case.Name): claimed byte $i is not in the image" }
+            }
+        }
+        & $Imager $idSource $faultImage --resume --sector 512 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "$($case.Name): resume after the fault exited $LASTEXITCODE" }
+        if ((Get-Sha256 $faultImage) -ne (Get-Sha256 $idSource)) { throw "$($case.Name): resumed image differs" }
+    }
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

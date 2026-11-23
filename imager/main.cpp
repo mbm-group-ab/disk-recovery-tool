@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "chunked_image_writer.h"
+#include "operation_lock.h"
 #include "random_access_reader.h"
 #include "rescue_map.h"
 #include "win32_paths.h"
@@ -342,6 +343,18 @@ public:
     }
 
     bool Write(uint64_t offset, const void* data, uint32_t size) {
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+        // Test build only (DR6 fault injection): a full destination after N bytes.
+        if (fail_after_ == UINT64_MAX) {
+            const char* value = getenv("IMAGER_TEST_FAIL_WRITE_AFTER");
+            fail_after_ = value && *value ? strtoull(value, nullptr, 10) : UINT64_MAX - 1;
+        }
+        if (written_ + size > fail_after_) {
+            last_error_ = ERROR_DISK_FULL;
+            return false;
+        }
+        written_ += size;
+#endif
         const bool ok = chunked_ ? chunked_->WriteAt(offset, data, size)
                                  : WriteAt(flat_, offset, data, size);
         if (!ok) last_error_ = chunked_ ? chunked_->LastErrorCode() : GetLastError();
@@ -375,6 +388,10 @@ private:
     HANDLE flat_ = INVALID_HANDLE_VALUE;
     std::unique_ptr<recovery::ChunkedImageWriter> chunked_;
     DWORD last_error_ = ERROR_SUCCESS;
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+    uint64_t fail_after_ = UINT64_MAX;
+    uint64_t written_ = 0;
+#endif
 };
 
 std::string FormatDuration(double seconds) {
@@ -589,7 +606,8 @@ int wmain(int argc, wchar_t** argv) {
                  L"exit codes: 0 done, 3 destination low, 4 drive unresponsive, 5 stop requested,\n"
                  L"            6 refused (would replace an existing image/map/report),\n"
                  L"            7 refused (--resume found another source than the map's),\n"
-                 L"            8 refused (the output is on the source's own disk)\n");
+                 L"            8 refused (the output is on the source's own disk),\n"
+                 L"            9 busy (another run is using this image)\n");
         return 1;
     }
 
@@ -714,6 +732,19 @@ int wmain(int argc, wchar_t** argv) {
 
     if (NormalizedPath(source_path) == NormalizedPath(dest_path)) {
         fwprintf(stderr, L"source and destination must be different\n");
+        return 1;
+    }
+
+    // One run per image: a second imager (or the GUI twice) on the same destination stops here,
+    // before it checks, creates or resumes anything.
+    recovery::OperationLock output_lock;
+    if (!output_lock.Acquire(dest_path + L".lock", "imager")) {
+        if (output_lock.Busy()) {
+            fwprintf(stderr, L"busy: another run is using %ls; nothing was written\n", dest_path.c_str());
+            return recovery::kExitBusy;
+        }
+        fwprintf(stderr, L"could not create %ls.lock, error %lu\n", dest_path.c_str(),
+                 static_cast<unsigned long>(output_lock.LastError()));
         return 1;
     }
 
@@ -915,6 +946,20 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(src);
         return 1;
     }
+    // The map exists from the first moment the image does, so a crash, power loss or full disk
+    // before the first checkpoint still leaves something --resume can continue (without it the
+    // image could neither be resumed nor replaced, DR1).
+    if (!map.Save(map_path_narrow)) {
+        fprintf(stderr, "could not write the rescue map %s\n", map_path_narrow.c_str());
+        CloseHandle(src);
+        return 1;
+    }
+
+    uint64_t checkpoint_every = kCheckpointEveryBytes;
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+    if (const char* value = getenv("IMAGER_TEST_CHECKPOINT_BYTES"); value && *value)
+        checkpoint_every = strtoull(value, nullptr, 10);
+#endif
 
     AlignedBuffer buffer(static_cast<size_t>(read_size), io_alignment);
     if (!buffer.IsValid()) {
@@ -1042,7 +1087,7 @@ int wmain(int argc, wchar_t** argv) {
             }
 
             auto now = std::chrono::steady_clock::now();
-            if (rescued_since_checkpoint >= kCheckpointEveryBytes ||
+            if (rescued_since_checkpoint >= checkpoint_every ||
                 now - last_checkpoint > std::chrono::seconds(30)) {
                 // The image must reach stable storage before the map claims
                 // that the corresponding bytes are safely rescued.

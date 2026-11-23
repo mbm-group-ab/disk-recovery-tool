@@ -106,6 +106,21 @@ int main() {
     Check(after_tool.Load(fp_path) && after_tool.LoadedFingerprint() == "file:1234:abcd",
           "fingerprint survives a save by a tool that never set it");
 
+    // DR6: a checkpoint that cannot write its temporary file (here: a directory is in the way,
+    // as with a full or failing disk) fails and leaves the last good map loadable.
+    const std::string blocked_path = (dir / "blocked.map").string();
+    recovery::RescueMap good(4096);
+    good.MarkRescued(0, 1024);
+    Check(good.Save(blocked_path), "map saves before the fault");
+    fs::create_directories(blocked_path + ".tmp");
+    recovery::RescueMap newer(4096);
+    newer.MarkRescued(0, 4096);
+    Check(!newer.Save(blocked_path), "save fails when the temporary file cannot be written");
+    recovery::RescueMap survivor(4096);
+    Check(survivor.Load(blocked_path) && !survivor.LoadedFromBackup() &&
+              survivor.TotalRescued() == 1024,
+          "last good map is intact after a failed save");
+
     fs::remove_all(dir, ec);
     if (failures == 0) std::cout << "all rescue map tests passed\n";
     return failures == 0 ? 0 : 1;

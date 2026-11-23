@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "operation_lock.h"
 #include "rescue_map.h"
 #include "random_access_reader.h"
 #include "sha256.h"
@@ -283,6 +284,17 @@ int main(int argc, char** argv) {
     recovery::CreateDirectoriesWin32(out_dir, dir_error);
     if (dir_error || !fs::is_directory(out_dir)) {
         fprintf(stderr, "cannot create output directory %s\n", out_dir.string().c_str());
+        return 1;
+    }
+    recovery::OperationLock output_lock;
+    if (!output_lock.Acquire(out_dir / ".recovery.lock", "carver")) {
+        if (output_lock.Busy()) {
+            fprintf(stderr, "busy: another run is writing to %s; nothing was written\n",
+                    out_dir.string().c_str());
+            return recovery::kExitBusy;
+        }
+        fprintf(stderr, "could not create the output lock, error %lu\n",
+                static_cast<unsigned long>(output_lock.LastError()));
         return 1;
     }
 

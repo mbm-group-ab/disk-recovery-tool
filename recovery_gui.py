@@ -36,7 +36,7 @@ TOOL_NAMES = {
 }
 
 IMAGER_EXIT_MEANING = {3: "exit_3", 4: "exit_4", 5: "exit_5", 6: "exit_6", 7: "exit_7",
-                       8: "exit_8"}
+                       8: "exit_8", 9: "exit_9"}
 
 
 def search_dirs():
@@ -438,7 +438,8 @@ def main():
                         self._append(value)
                     else:
                         tool = self.job["tool"] if self.job else ""
-                        key = IMAGER_EXIT_MEANING.get(value) if tool == "imager" else None
+                        key = (IMAGER_EXIT_MEANING.get(value) if tool == "imager"
+                               else "exit_9" if value == 9 else None)
                         self._append(self.t("exit_code", code=value,
                                             meaning=self.t(key) if key else ""))
                         self.job = None
