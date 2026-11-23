@@ -28,8 +28,12 @@ ctest --test-dir build --output-on-failure
 Every change to a tool needs a test in `tests/` (C++ unit tests or the `*_integration.ps1` scripts on synthetic images).
 
 ## CI and deploy (public repo, GitHub-hosted runners are fine)
-- `release.yml`: on every push to `main`, bumps a patch tag and attaches the Windows/macOS/Linux GUI builds
-  (PyInstaller) to a GitHub Release.
+- `release.yml` (Windows only): builds the engine, runs ctest, packages GUI + `engine\` + `manifest.json` +
+  `SHA256SUMS.txt` as `DiskRecoveryTool-windows.zip`, and publishes a release only when `VERSION` in
+  `recovery_gui.py` has no `v<VERSION>` tag yet. Bump `VERSION` to release; macOS/Linux are not packaged.
+- Imager exit codes are part of the GUI contract (3 low space, 4 unresponsive, 5 stop requested via
+  `<dest>.stop`, 6 refused existing image/map/report). GUI texts live in `gui_i18n.py` (EN/SV/FA, keys checked
+  by `tests/gui_contract_test.py`); command lines come only from the `build_*_args` functions.
 - `deploy-vps.yml`: copies the landing page to the VPS `static-sites` container
   (`disk-recovery-tool.mbm-group.se`). A push runs the checks; the deploy waits for the owner's 🚀 in MBM Control.
   Never start a deploy yourself.

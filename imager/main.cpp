@@ -42,6 +42,8 @@ constexpr int kMaxRetriesPerChunk = 2;
 constexpr uint64_t kCheckpointEveryBytes = 512ull * 1024 * 1024;  // save map every 512MB progress
 constexpr int kExitDestinationLow = 3;  // stopped cleanly because --min-dest-free was reached
 constexpr int kExitDriveUnresponsive = 4;  // stopped cleanly: --max-consecutive-failures reached
+constexpr int kExitStopRequested = 5;  // stopped cleanly because <dest>.stop appeared (GUI Stop)
+constexpr int kExitRefusedExisting = 6;  // nothing done: the run would replace existing recovery data
 
 // Directory whose volume holds the destination image (or the chunk index).
 std::wstring DestinationDirectory(const std::wstring& dest_path) {
@@ -103,7 +105,8 @@ uint64_t GetSourceSize(HANDLE h) {
 
 HANDLE OpenDestImage(const std::wstring& path, uint64_t total_size, bool resume) {
     HANDLE h = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                            FILE_SHARE_READ, nullptr, resume ? OPEN_EXISTING : CREATE_ALWAYS, 0, nullptr);
+                            FILE_SHARE_READ, nullptr, resume ? OPEN_EXISTING : CREATE_NEW, 0, nullptr);
+    // CREATE_NEW: a new run never replaces an existing image (DR1).
     if (h == INVALID_HANDLE_VALUE) FailWin32("CreateFile(dest)");
 
     // Mark sparse so unwritten (bad-sector) regions don't consume disk space.
@@ -419,7 +422,9 @@ int wmain(int argc, wchar_t** argv) {
                  L"       [--read-timeout-ms N] [--pause-every SIZE --pause-seconds N]\n"
                  L"       [--skip-size SIZE] [--min-dest-free SIZE] [--max-consecutive-failures N]\n"
                  L"       [--chunk-size SIZE --chunk-dest DIR CAPACITY]... [--lazy-parts]\n"
-                 L"       [--source-size SIZE]  (image only the first SIZE bytes)\n");
+                 L"       [--source-size SIZE]  (image only the first SIZE bytes)\n"
+                 L"exit codes: 0 done, 3 destination low, 4 drive unresponsive, 5 stop requested,\n"
+                 L"            6 refused (would replace an existing image/map/report)\n");
         return 1;
     }
 
@@ -542,6 +547,36 @@ int wmain(int argc, wchar_t** argv) {
     if (NormalizedPath(source_path) == NormalizedPath(dest_path)) {
         fwprintf(stderr, L"source and destination must be different\n");
         return 1;
+    }
+
+    // DR1: a run without --resume must never replace earlier recovery data. Check every
+    // file this run would create before the source is even opened; replacing them is a
+    // separate, deliberate step (move or rename them first).
+    if (!resume) {
+        const std::wstring would_create[] = {
+            dest_path, dest_path + L".map", dest_path + L".map.bak", dest_path + L".map.tmp",
+            report_path.empty() ? dest_path + L".report.json" : report_path};
+        bool collision = false;
+        for (const auto& candidate : would_create) {
+            if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                fwprintf(stderr, L"refusing to overwrite existing file: %ls\n", candidate.c_str());
+                collision = true;
+            }
+        }
+        if (collision) {
+            fwprintf(stderr, L"use --resume to continue that image, or choose a new destination "
+                             L"name; nothing was written\n");
+            return kExitRefusedExisting;
+        }
+    }
+
+    // A stop request (<dest>.stop, written by the GUI's Stop button) is honoured at the next
+    // checkpoint; one that is already there means "do not start".
+    const std::wstring stop_path = dest_path + L".stop";
+    if (GetFileAttributesW(stop_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(stop_path.c_str());
+        printf("stop requested before start; nothing was read or written\n");
+        return kExitStopRequested;
     }
 
     HANDLE src = OpenSourceForRawRead(source_path);
@@ -777,6 +812,16 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 last_checkpoint = now;
                 rescued_since_checkpoint = 0;
+
+                if (GetFileAttributesW(stop_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    // Image flushed, map and report checkpointed just above.
+                    DeleteFileW(stop_path.c_str());
+                    printf("\nstop requested; stopped cleanly after %.2f GB rescued. "
+                           "Continue later with --resume.\n",
+                           map.TotalRescued() / (1024.0 * 1024.0 * 1024.0));
+                    CloseHandle(src);
+                    return kExitStopRequested;
+                }
 
                 if (min_dest_free != 0) {
                     ULARGE_INTEGER free_bytes{};

@@ -1,5 +1,10 @@
-name: Tag and Build GUI
+name: Build, test and release (Windows)
 
+# One chain: build the C++ engine, run every test, package engine + GUI, and
+# publish a release only when VERSION in recovery_gui.py has no tag yet.
+# The release is cut from the same commit and the same files that passed the
+# tests. Only Windows is packaged: the engine uses Win32 raw-disk I/O and is
+# not supported on macOS/Linux.
 on:
   push:
     branches: [main]
@@ -8,67 +13,106 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  tag:
-    runs-on: ubuntu-latest
-    outputs:
-      new_tag: ${{ steps.bump.outputs.new_tag }}
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Bump patch version and push tag
-        id: bump
-        uses: anothrNick/github-tag-action@1.71.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEFAULT_BUMP: patch
-          WITH_V: true
-
-  build:
-    needs: tag
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: DiskRecoveryGUI-windows.exe
-            build_path: dist/DiskRecoveryGUI.exe
-          - os: macos-latest
-            artifact_name: DiskRecoveryGUI-macos
-            build_path: dist/DiskRecoveryGUI
-          - os: ubuntu-latest
-            artifact_name: DiskRecoveryGUI-linux
-            build_path: dist/DiskRecoveryGUI
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Tk (Linux only)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-tk
-
-      - name: Install PyInstaller
-        run: pip install pyinstaller
-
-      - name: Build executable
-        run: pyinstaller --onefile --windowed --name DiskRecoveryGUI recovery_gui.py
-
-      - name: Rename artifact
+      - name: Read version
+        id: version
         shell: bash
-        run: cp "${{ matrix.build_path }}" "${{ matrix.artifact_name }}"
+        run: |
+          version=$(python -c "import re;print(re.search(r'^VERSION = \"([0-9.]+)\"', open('recovery_gui.py').read(), re.M).group(1))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$version already released; build and test only."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build engine (MinGW, static)
+        shell: bash
+        run: |
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Build GUI
+        run: |
+          pip install pyinstaller==6.11.1
+          pyinstaller --onefile --windowed --name DiskRecoveryGUI recovery_gui.py
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          pkg="DiskRecoveryTool-windows"
+          rm -rf "$pkg" && mkdir -p "$pkg/engine"
+          cp dist/DiskRecoveryGUI.exe "$pkg/"
+          cp build/imager/imager.exe build/exfat-parser/exfat_recovery.exe \
+             build/carver/recovery_carver.exe build/map-tool/rescue_map_tool.exe "$pkg/engine/"
+          cp README.md recover.ps1 "$pkg/"
+          python - "$pkg" "$version" "$GITHUB_SHA" <<'EOF'
+          import hashlib, json, os, sys
+          pkg, version, commit = sys.argv[1:4]
+          files = []
+          for root, _, names in os.walk(pkg):
+              for name in sorted(names):
+                  path = os.path.join(root, name)
+                  rel = os.path.relpath(path, pkg).replace(os.sep, "/")
+                  digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+                  files.append({"path": rel, "size": os.path.getsize(path), "sha256": digest})
+          manifest = {"product": "Disk Recovery Tool", "version": version, "commit": commit,
+                      "platform": "windows-x64", "files": files}
+          json.dump(manifest, open(os.path.join(pkg, "manifest.json"), "w"), indent=1)
+          with open(os.path.join(pkg, "SHA256SUMS.txt"), "w") as f:
+              for entry in files:
+                  f.write("%s  %s\n" % (entry["sha256"], entry["path"]))
+          EOF
+          7z a -tzip "$pkg.zip" "$pkg" >/dev/null
+          sha256sum "$pkg.zip" > "$pkg.zip.sha256"
+          echo "zip=$pkg.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the package (engine found beside the GUI, binaries run)
+        shell: bash
+        run: |
+          for exe in DiskRecoveryTool-windows/engine/*.exe; do
+            "$exe" >/dev/null 2>&1 && code=0 || code=$?
+            [ "$code" -eq 1 ] || { echo "$exe exited $code on no arguments"; exit 1; }
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
+          name: DiskRecoveryTool-windows
+          path: |
+            DiskRecoveryTool-windows.zip
+            DiskRecoveryTool-windows.zip.sha256
 
-      - name: Upload to GitHub Release
+      - name: Publish release
+        if: steps.version.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.tag.outputs.new_tag }}
-          files: ${{ matrix.artifact_name }}
+          tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Disk Recovery Tool ${{ steps.version.outputs.version }}
+          body: |
+            Windows package: GUI + recovery engine (imager, exfat_recovery, recovery_carver, rescue_map_tool), manifest.json and SHA256SUMS.txt.
+            Unzip and run DiskRecoveryGUI.exe. macOS and Linux are not supported for recovery.
+          files: |
+            DiskRecoveryTool-windows.zip
+            DiskRecoveryTool-windows.zip.sha256

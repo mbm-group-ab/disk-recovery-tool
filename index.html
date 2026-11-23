@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Disk Recovery Tool — Rescue data off a failing drive. Free.</title>
-<meta name="description" content="A free, open-source toolchain (plus a cross-platform GUI) for imaging a failing/damaged disk and recovering exFAT files by parsing metadata directly, with signature carving as a fallback. Windows, macOS and Linux.">
+<meta name="description" content="A free, open-source toolchain with a graphical front-end for imaging a failing/damaged disk and recovering exFAT files by parsing metadata directly, with signature carving as a fallback. For Windows.">
 <link rel="canonical" href="https://disk-recovery-tool.mbm-group.se/">
 <link rel="icon" type="image/png" href="assets/icon-256.png">
 <style>
@@ -93,29 +93,20 @@
     <p class="sub">A free, open-source toolchain for imaging a damaged/failing disk sector by
       sector, then recovering exFAT files by parsing filesystem metadata directly — with
       signature-based carving as a fallback for what metadata recovery can't rebuild. A
-      graphical front-end wraps all of it for Windows, macOS and Linux.</p>
+      graphical front-end wraps all of it, for Windows.</p>
 
     <div class="downloads" id="download">
-      <a class="dl-btn primary" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-windows.exe">
+      <a class="dl-btn primary" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryTool-windows.zip">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zm0 13L10.5 19.6v-7.1H3zm8.4-13.8L21 3.3v8.2h-9.6zm0 8.9H21v8.2l-9.6-1.3z"/></svg>
         Download for Windows
       </a>
-      <a class="dl-btn" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-macos">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.1 2.5-1.8 3-.5 7.5 1.2 10 .9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.2-1.2 3.1-2.5.7-1 1.1-2 1.4-3-1.7-.7-3.8-2.1-3.8-4.7zM14.6 4.5c.7-.9 1.2-2.1 1.1-3.4-1 0-2.4.7-3.1 1.6-.7.8-1.3 2-1.1 3.3 1.2.1 2.4-.6 3.1-1.5z"/></svg>
-        Download for macOS
-      </a>
-      <a class="dl-btn" href="https://github.com/mbm-group-ab/disk-recovery-tool/releases/latest/download/DiskRecoveryGUI-linux">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-1.2 0-2 1.4-2 3.2 0 1.1.4 1.9.7 2.6-1 .5-2.6 1.6-3.4 3.4-.6 1.3-.6 2.6-1.5 3.1-.7.4-1 1-.8 1.6.2.6.9.8 1.6.7-.1.6 0 1.2.5 1.6.7.6 1.8.5 2.4-.1.6.5 1.6.9 2.5.9s1.9-.4 2.5-.9c.6.6 1.7.7 2.4.1.5-.4.6-1 .5-1.6.7.1 1.4-.1 1.6-.7.2-.6-.1-1.2-.8-1.6-.9-.5-.9-1.8-1.5-3.1-.8-1.8-2.4-2.9-3.4-3.4.3-.7.7-1.5.7-2.6C14 3.4 13.2 2 12 2z"/></svg>
-        Download for Linux
-      </a>
     </div>
-    <p class="dl-note">Portable, single-file executables — nothing to install.
+    <p class="dl-note">One zip with the GUI and the recovery engine, plus a manifest and SHA-256 checksums. Unzip and run DiskRecoveryGUI.exe; nothing to install.
       All builds and source: <a href="https://github.com/mbm-group-ab/disk-recovery-tool/releases">Releases</a> · <a href="https://github.com/mbm-group-ab/disk-recovery-tool">Source on GitHub</a></p>
 
-    <div class="warn">Raw physical-drive imaging (<code>\\.\PhysicalDriveN</code>) only works on
-      Windows today — the imager talks to the Win32 device API directly. macOS/Linux builds of
-      the GUI can still scan/recover/carve from an image file (<code>.img</code>/<code>.rci</code>)
-      produced elsewhere.</div>
+    <div class="warn">Windows only: the recovery engine talks to the Win32 device API directly
+      (<code>\\.\PhysicalDriveN</code>). macOS and Linux are not supported for recovery.
+      The tool never writes to the source disk, and a new run never replaces an existing image.</div>
   </section>
 
   <section id="features" class="features">

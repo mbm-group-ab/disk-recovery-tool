@@ -52,6 +52,12 @@ add_test(NAME map_tool_integration
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
             -File "${CMAKE_CURRENT_SOURCE_DIR}/map_tool_integration.ps1"
             -MapTool "$<TARGET_FILE:rescue_map_tool>")
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    add_test(NAME gui_contract
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/gui_contract_test.py"
+                --carver "$<TARGET_FILE:carver>" --imager "$<TARGET_FILE:imager_file_test_runner>")
+endif()
 if(MINGW)
     get_filename_component(MINGW_RUNTIME_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set_tests_properties(rescue_map_tests chunk_store_tests exfat_parser_integration imager_integration carver_integration map_tool_integration PROPERTIES

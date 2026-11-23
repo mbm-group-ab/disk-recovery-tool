@@ -25,12 +25,25 @@ workstation does not need matching MinGW DLLs beside the executables.
 
 ## Graphical front-end (`recovery_gui.py`)
 
-A cross-platform GUI (Tkinter) that wraps the four executables above,
-one tab per stage, and always shows the exact command line it runs (same
-philosophy as `recover.ps1`, but graphical).
+A GUI (Tkinter) that wraps the four executables above, one tab per stage,
+and always shows the exact command line it runs (same philosophy as
+`recover.ps1`, but graphical). English / Svenska / فارسی (Language menu,
+remembered), version in Help > About. One job at a time; **Stop** asks the
+imager to stop cleanly at its next checkpoint (it writes `<dest>.stop`), so
+the image can be continued with `--resume`. The Carve tab offers whole image
+or byte ranges, an output cap, a rescue map and `--include-partial`.
 
-**Download a build:** grab `DiskRecoveryGUI-windows.exe` / `-macos` / `-linux`
-from the [latest release](../../releases/latest) — no Python install needed.
+**Download a build:** `DiskRecoveryTool-windows.zip` from the
+[latest release](../../releases/latest): GUI + engine (`engine\`),
+`manifest.json` (version, commit, file hashes) and `SHA256SUMS.txt`. No Python
+or MinGW needed. Windows only: the engine uses Win32 raw-disk I/O, so macOS
+and Linux are not supported for recovery. A release is cut by `release.yml`
+when `VERSION` in `recovery_gui.py` has no tag yet, after the full test run.
+
+**Imager exit codes:** 0 done, 3 destination low on space, 4 drive stopped
+answering, 5 stop requested, 6 refused because the image, its map or its
+report already exists (a run without `--resume` never replaces them; move or
+rename them first, or pass `--resume`).
 
 **Or run from source** (any OS with Python 3; Tkinter ships with standard
 Python on Windows/macOS, on Linux: `sudo apt install python3-tk`):
@@ -40,16 +53,12 @@ python recovery_gui.py
 ```
 
 Raw physical-drive access (`\\.\PhysicalDriveN`) only works on Windows,
-because the recovery executables use the Win32 API directly. On macOS/Linux
-the GUI still builds and runs commands against image files (`.img`/`.rci`)
-you already produced elsewhere, and is useful for scanning/recovering from
-a copied image.
+because the recovery executables use the Win32 API directly. The GUI starts
+on macOS/Linux but the engine is not built or supported there.
 
-Windows/macOS/Linux builds are produced automatically by
-`.github/workflows/release.yml` (PyInstaller) on every push to `main` — it
-bumps a patch version tag and attaches all three executables to that
-GitHub Release in one workflow run, so anyone can `git clone` or just
-download the executable for their OS.
+The tests include `tests/gui_contract_test.py`, which runs the GUI's command
+builders against the real `recovery_carver` and imager binaries on a
+synthetic image (`ctest` runs it when Python is found).
 
 ## Guided menu (`recover.ps1`)
 

@@ -58,6 +58,40 @@ try {
         throw 'final machine-readable report is incomplete'
     }
 
+    # DR1: a second run without --resume must refuse and leave image, map and report untouched.
+    $imageHashBefore = Get-Sha256 $image
+    $mapBefore = [IO.File]::ReadAllText("$image.map")
+    & $Imager $source $image --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 6) { throw "rerun without --resume exited $LASTEXITCODE, expected refusal (6)" }
+    if ((Get-Sha256 $image) -ne $imageHashBefore) { throw 'rerun without --resume changed the image' }
+    if ([IO.File]::ReadAllText("$image.map") -ne $mapBefore) { throw 'rerun changed the map' }
+
+    # A stray map or report alone (image missing) is also refused.
+    $mapOnly = Join-Path $testRoot 'maponly.bin'
+    [IO.File]::WriteAllText("$mapOnly.map", 'keep')
+    & $Imager $source $mapOnly --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 6 -or (Test-Path -LiteralPath $mapOnly)) { throw 'map-only collision was not refused' }
+    if ([IO.File]::ReadAllText("$mapOnly.map") -ne 'keep') { throw 'map-only file was changed' }
+    $reportOnly = Join-Path $testRoot 'reportonly.bin'
+    $customReport = Join-Path $testRoot 'custom-report.json'
+    [IO.File]::WriteAllText($customReport, 'keep')
+    & $Imager $source $reportOnly --sector 512 --report $customReport | Out-Host
+    if ($LASTEXITCODE -ne 6 -or (Test-Path -LiteralPath $reportOnly)) { throw 'report collision was not refused' }
+
+    # A pending stop request is honoured before anything is read or written.
+    [IO.File]::WriteAllText("$image.stop", '')
+    & $Imager $source $image --resume --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 5) { throw "pending stop request gave exit $LASTEXITCODE, expected 5" }
+    if (Test-Path -LiteralPath "$image.stop") { throw 'stop request file was not consumed' }
+    if ((Get-Sha256 $image) -ne $imageHashBefore) { throw 'stop request run changed the image' }
+
+    # A hard link to the image under another name is an existing file too.
+    $hardLink = Join-Path $testRoot 'image-link.bin'
+    New-Item -ItemType HardLink -Path $hardLink -Target $image | Out-Null
+    & $Imager $source $hardLink --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 6) { throw 'hard-link alias was not refused' }
+    if ((Get-Sha256 $image) -ne $imageHashBefore) { throw 'hard-link run changed the image' }
+
     $deferredMap = ([IO.File]::ReadAllText("$image.map") -replace '(?m)^0 1048576 \+\r?$', '0 1048576 *')
     if ($deferredMap -notmatch '(?m)^0 1048576 \*$') { throw 'could not construct deferred map fixture' }
     [IO.File]::WriteAllText("$image.map", $deferredMap)
@@ -99,6 +133,12 @@ try {
     if ((Get-Sha256 $source) -ne (Get-ChunkedSha256 $chunkIndex)) {
         throw 'resumed chunked image hash differs from source hash'
     }
+
+    $indexBefore = [IO.File]::ReadAllText($chunkIndex)
+    & $Imager $source $chunkIndex --sector 512 --chunk-size 256K `
+        --chunk-dest $chunkA 512K --chunk-dest $chunkB 512K | Out-Host
+    if ($LASTEXITCODE -ne 6) { throw 'chunked rerun without --resume was not refused' }
+    if ([IO.File]::ReadAllText($chunkIndex) -ne $indexBefore) { throw 'chunked rerun changed the index' }
 
     $tooSmallIndex = Join-Path $testRoot 'too-small.rci'
     $tooSmallRoot = Join-Path $testRoot 'too-small'
