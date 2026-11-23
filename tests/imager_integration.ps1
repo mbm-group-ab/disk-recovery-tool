@@ -170,6 +170,68 @@ try {
     if ((Get-Sha256 $source) -ne (Get-Sha256 $image)) {
         throw 'rejected resume modified the existing image'
     }
+
+    # DR5: source identity on resume. Fresh source/image pair, imaged in full first.
+    $idSource = Join-Path $testRoot 'id-source.bin'
+    $idImage = Join-Path $testRoot 'id-image.img'
+    $idBytes = [byte[]]::new(512KB)
+    ([Random]::new(777)).NextBytes($idBytes)
+    [IO.File]::WriteAllBytes($idSource, $idBytes)
+    & $Imager $idSource $idImage --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "identity fixture imaging exited $LASTEXITCODE" }
+    if ([IO.File]::ReadAllText("$idImage.map") -notmatch '(?m)^#fingerprint "file:[0-9a-f:]+"') {
+        throw 'map does not record the source fingerprint'
+    }
+    $idImageHash = Get-Sha256 $idImage
+
+    & $Imager $idSource $idImage --resume --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "resume of the same source exited $LASTEXITCODE" }
+
+    # Same path, same size, different content written in place (same file id): the samples catch it.
+    $changed = [byte[]]::new(512KB)
+    ([Random]::new(778)).NextBytes($changed)
+    $stream = [IO.File]::Open($idSource, 'Open', 'Write')
+    try { $stream.Write($changed, 0, $changed.Length) } finally { $stream.Dispose() }
+    & $Imager $idSource $idImage --resume --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 7) { throw "in-place changed source gave exit $LASTEXITCODE, expected 7" }
+    if ((Get-Sha256 $idImage) -ne $idImageHash) { throw 'refused resume (changed content) modified the image' }
+
+    # Deleted and recreated at the same path with the original bytes: new file id -> refused.
+    Remove-Item -LiteralPath $idSource -Force
+    [IO.File]::WriteAllBytes($idSource, $idBytes)
+    & $Imager $idSource $idImage --resume --sector 512 | Out-Host
+    if ($LASTEXITCODE -ne 7) { throw "replaced source gave exit $LASTEXITCODE, expected 7" }
+    if ((Get-Sha256 $idImage) -ne $idImageHash) { throw 'refused resume (new id) modified the image' }
+
+    # Same bytes behind a new id are accepted only with --allow-new-source-id.
+    & $Imager $idSource $idImage --resume --sector 512 --allow-new-source-id | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "--allow-new-source-id with matching data exited $LASTEXITCODE" }
+
+    # ...but never when the rescued samples differ.
+    Remove-Item -LiteralPath $idSource -Force
+    [IO.File]::WriteAllBytes($idSource, $changed)
+    & $Imager $idSource $idImage --resume --sector 512 --allow-new-source-id | Out-Host
+    if ($LASTEXITCODE -ne 7) { throw "--allow-new-source-id with other data gave exit $LASTEXITCODE, expected 7" }
+    if ((Get-Sha256 $idImage) -ne $idImageHash) { throw 'refused resume (override) modified the image' }
+
+    # Destination on the source's own disk (disk numbers faked in the test build).
+    $sameDisk = Join-Path $testRoot 'same-disk.img'
+    $env:IMAGER_TEST_SOURCE_DISK = '3'
+    $env:IMAGER_TEST_DEST_DISK = '3'
+    try {
+        & $Imager $idSource $sameDisk --sector 512 | Out-Host
+        if ($LASTEXITCODE -ne 8) { throw "destination on the source disk gave exit $LASTEXITCODE, expected 8" }
+        if ((Test-Path -LiteralPath $sameDisk) -or (Test-Path -LiteralPath "$sameDisk.map")) {
+            throw 'refused same-disk run created files'
+        }
+        $env:IMAGER_TEST_DEST_DISK = '4'
+        & $Imager $idSource $sameDisk --sector 512 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "destination on another disk exited $LASTEXITCODE" }
+    }
+    finally {
+        Remove-Item Env:IMAGER_TEST_SOURCE_DISK -ErrorAction SilentlyContinue
+        Remove-Item Env:IMAGER_TEST_DEST_DISK -ErrorAction SilentlyContinue
+    }
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

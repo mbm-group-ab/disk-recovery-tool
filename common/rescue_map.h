@@ -43,6 +43,13 @@ public:
     // Load rejects maps created for another command identity.
     void ConfigureIdentity(std::string source, std::string destination,
                            uint32_t sector_size);
+    // Device serial or file id of the source (DR5). Not part of the identity check in
+    // Load, so the imager can refuse a changed source with its own exit code; an old map
+    // without one loads and gets the current fingerprint on the next save.
+    void SetSourceFingerprint(std::string fingerprint) { source_fingerprint_ = std::move(fingerprint); }
+    const std::string& SourceFingerprint() const { return source_fingerprint_; }
+    // The fingerprint stored in the map that Load read (empty for an old map).
+    const std::string& LoadedFingerprint() const { return loaded_fingerprint_; }
     const std::string& GenerationId() const { return generation_id_; }
     bool LoadedFromBackup() const { return loaded_from_backup_; }
 
@@ -72,6 +79,8 @@ private:
     std::string source_identity_;
     std::string destination_identity_;
     uint32_t sector_size_ = 0;
+    std::string source_fingerprint_;
+    std::string loaded_fingerprint_;
     std::string generation_id_;
     bool loaded_from_backup_ = false;
     // Sorted, non-overlapping, contiguous coverage of [0, total_size_).

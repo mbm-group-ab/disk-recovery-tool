@@ -21,6 +21,7 @@ struct MapMetadata {
     std::string generation;
     std::string source;
     std::string destination;
+    std::string fingerprint;
     uint32_t sector_size = 0;
 };
 
@@ -51,6 +52,7 @@ bool LoadValidated(const std::string& path, uint64_t expected_total,
             else if (tag == "#source") header >> std::quoted(metadata.source);
             else if (tag == "#destination") header >> std::quoted(metadata.destination);
             else if (tag == "#sector") header >> metadata.sector_size;
+            else if (tag == "#fingerprint") header >> std::quoted(metadata.fingerprint);
             continue;
         }
         std::istringstream iss(line);
@@ -90,7 +92,7 @@ std::string NewGenerationId() {
 
 bool RescueMap::Load(const std::string& path) {
     std::vector<Range> loaded;
-    MapMetadata expected{generation_id_, source_identity_, destination_identity_, sector_size_};
+    MapMetadata expected{generation_id_, source_identity_, destination_identity_, {}, sector_size_};
     MapMetadata metadata;
     loaded_from_backup_ = false;
     if (!LoadValidated(path, total_size_, expected, loaded, metadata)) {
@@ -101,6 +103,8 @@ bool RescueMap::Load(const std::string& path) {
     }
     ranges_ = std::move(loaded);
     if (!metadata.generation.empty()) generation_id_ = std::move(metadata.generation);
+    loaded_fingerprint_ = metadata.fingerprint;
+    if (source_fingerprint_.empty()) source_fingerprint_ = std::move(metadata.fingerprint);
     if (source_identity_.empty()) {
         source_identity_ = std::move(metadata.source);
         destination_identity_ = std::move(metadata.destination);
@@ -133,6 +137,8 @@ bool RescueMap::Save(const std::string& path) const {
             out << "#destination " << std::quoted(destination_identity_) << "\n";
             out << "#sector " << sector_size_ << "\n";
         }
+        if (!source_fingerprint_.empty())
+            out << "#fingerprint " << std::quoted(source_fingerprint_) << "\n";
         for (const auto& r : ranges_) {
             out << r.offset << " " << r.size << " " << static_cast<char>(r.status) << "\n";
         }

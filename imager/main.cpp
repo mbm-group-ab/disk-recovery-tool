@@ -21,6 +21,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
@@ -31,6 +33,7 @@
 #include <vector>
 
 #include "chunked_image_writer.h"
+#include "random_access_reader.h"
 #include "rescue_map.h"
 #include "win32_paths.h"
 
@@ -44,6 +47,9 @@ constexpr int kExitDestinationLow = 3;  // stopped cleanly because --min-dest-fr
 constexpr int kExitDriveUnresponsive = 4;  // stopped cleanly: --max-consecutive-failures reached
 constexpr int kExitStopRequested = 5;  // stopped cleanly because <dest>.stop appeared (GUI Stop)
 constexpr int kExitRefusedExisting = 6;  // nothing done: the run would replace existing recovery data
+constexpr int kExitSourceChanged = 7;    // nothing done: --resume found another disk/file than the map's
+constexpr int kExitDestOnSource = 8;     // nothing done: the output would land on the source's own disk
+constexpr int kResumeSamples = 8;        // rescued sectors re-read and compared on --resume (DR5)
 
 // Directory whose volume holds the destination image (or the chunk index).
 std::wstring DestinationDirectory(const std::wstring& dest_path) {
@@ -411,6 +417,161 @@ void PrintProgressLine(const recovery::RescueMap& map, uint64_t total_size,
     fflush(stdout);
 }
 
+// --- DR5: source identity on resume -------------------------------------------------------
+
+[[maybe_unused]] std::string TrimmedField(const std::vector<uint8_t>& buffer, DWORD returned, DWORD offset) {
+    if (offset == 0 || offset >= returned) return {};
+    const char* text = reinterpret_cast<const char*>(buffer.data()) + offset;
+    std::string value(text, strnlen(text, returned - offset));
+    const auto first = value.find_first_not_of(' ');
+    if (first == std::string::npos) return {};
+    value = value.substr(first, value.find_last_not_of(' ') - first + 1);
+    std::replace(value.begin(), value.end(), '|', '/');
+    return value;
+}
+
+// What the source *is*, independent of the path used to open it: vendor/product/serial for a
+// disk or volume, volume serial + file id for a regular file. Empty when nothing is known.
+std::string SourceFingerprint(HANDLE source) {
+#ifndef RECOVERY_REGULAR_FILES_ONLY
+    STORAGE_PROPERTY_QUERY query{};
+    query.PropertyId = StorageDeviceProperty;
+    query.QueryType = PropertyStandardQuery;
+    std::vector<uint8_t> buffer(4096);
+    DWORD returned = 0;
+    if (DeviceIoControlSync(source, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
+                            buffer.data(), static_cast<DWORD>(buffer.size()), &returned) &&
+        returned >= sizeof(STORAGE_DEVICE_DESCRIPTOR)) {
+        const auto* descriptor = reinterpret_cast<const STORAGE_DEVICE_DESCRIPTOR*>(buffer.data());
+        return "device:" + TrimmedField(buffer, returned, descriptor->VendorIdOffset) + "|" +
+               TrimmedField(buffer, returned, descriptor->ProductIdOffset) + "|" +
+               TrimmedField(buffer, returned, descriptor->SerialNumberOffset);
+    }
+#endif
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(source, &info)) return {};
+    char value[64];
+    snprintf(value, sizeof(value), "file:%08lx:%08lx%08lx",
+             static_cast<unsigned long>(info.dwVolumeSerialNumber),
+             static_cast<unsigned long>(info.nFileIndexHigh),
+             static_cast<unsigned long>(info.nFileIndexLow));
+    return value;
+}
+
+struct SampleCheck {
+    int matched = 0;
+    int mismatched = 0;
+    int unreadable = 0;
+    uint64_t first_mismatch = 0;
+};
+
+// Re-reads a few small pieces of already-rescued ranges from the source and compares them
+// with the image. Costs at most kResumeSamples small reads; never writes anything.
+SampleCheck CheckRescuedSamples(HANDLE source, recovery::RandomAccessReader& image,
+                                const recovery::RescueMap& map, uint32_t sector_size,
+                                uint32_t io_alignment, uint32_t timeout_ms) {
+    SampleCheck result;
+    const auto rescued = map.RangesWithStatus(recovery::RangeStatus::Rescued);
+    uint64_t total = 0;
+    for (const auto& range : rescued) total += range.size;
+    if (total == 0) return result;
+    AlignedBuffer from_source(io_alignment, io_alignment);
+    std::vector<uint8_t> from_image(io_alignment);
+    if (!from_source.IsValid()) return result;
+    uint64_t previous = UINT64_MAX;
+    for (int k = 0; k < kResumeSamples; ++k) {
+        const uint64_t position = total / (2 * kResumeSamples) * (2 * k + 1);
+        uint64_t seen = 0;
+        const recovery::Range* hit = nullptr;
+        for (const auto& range : rescued) {
+            if (position < seen + range.size) { hit = &range; break; }
+            seen += range.size;
+        }
+        if (!hit) continue;
+        const uint64_t candidate = hit->offset + (position - seen);
+        const uint64_t end = hit->offset + hit->size;
+        uint64_t start = candidate - candidate % io_alignment;
+        uint32_t length = io_alignment;
+        if (start < hit->offset || start + length > end) {
+            start = candidate - candidate % sector_size;
+            length = sector_size;
+            if (start < hit->offset || start + length > end) continue;
+        }
+        if (start == previous) continue;
+        previous = start;
+        uint32_t got = 0;
+        DWORD error = ERROR_SUCCESS;
+        if (!ReadAt(source, start, from_source.data, length, timeout_ms, &got, &error) ||
+            got != length || !image.ReadAt(start, from_image.data(), length)) {
+            ++result.unreadable;
+            continue;
+        }
+        if (memcmp(from_source.data, from_image.data(), length) == 0) {
+            ++result.matched;
+        } else {
+            if (result.mismatched == 0) result.first_mismatch = start;
+            ++result.mismatched;
+        }
+    }
+    return result;
+}
+
+// Disk numbers under a disk/volume handle (empty for a regular file).
+[[maybe_unused]] std::vector<DWORD> DiskNumbersOf(HANDLE handle) {
+    std::vector<DWORD> disks;
+#ifndef RECOVERY_REGULAR_FILES_ONLY
+    std::vector<uint8_t> buffer(sizeof(VOLUME_DISK_EXTENTS) + 32 * sizeof(DISK_EXTENT));
+    DWORD returned = 0;
+    if (DeviceIoControlSync(handle, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, nullptr, 0,
+                            buffer.data(), static_cast<DWORD>(buffer.size()), &returned)) {
+        const auto* extents = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(buffer.data());
+        for (DWORD i = 0; i < extents->NumberOfDiskExtents && i < 32; ++i)
+            disks.push_back(extents->Extents[i].DiskNumber);
+        return disks;
+    }
+    STORAGE_DEVICE_NUMBER number{};
+    if (DeviceIoControlSync(handle, IOCTL_STORAGE_GET_DEVICE_NUMBER, nullptr, 0, &number,
+                            sizeof(number), &returned) && number.DeviceType == FILE_DEVICE_DISK) {
+        disks.push_back(number.DeviceNumber);
+    }
+#else
+    (void)handle;
+#endif
+    return disks;
+}
+
+// Disk numbers of the volume that holds `path` (which need not exist yet).
+[[maybe_unused]] std::vector<DWORD> DiskNumbersOfPath(const std::wstring& path) {
+    std::vector<DWORD> disks;
+#ifndef RECOVERY_REGULAR_FILES_ONLY
+    wchar_t mount_point[MAX_PATH + 1] = {};
+    wchar_t volume_name[MAX_PATH + 1] = {};
+    const std::wstring full = recovery::FullPathWin32(path).wstring();
+    if (!GetVolumePathNameW(full.c_str(), mount_point, MAX_PATH) ||
+        !GetVolumeNameForVolumeMountPointW(mount_point, volume_name, MAX_PATH)) return disks;
+    std::wstring volume(volume_name);
+    if (!volume.empty() && volume.back() == L'\\') volume.pop_back();
+    HANDLE handle = CreateFileW(volume.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return disks;
+    disks = DiskNumbersOf(handle);
+    CloseHandle(handle);
+#else
+    (void)path;
+#endif
+    return disks;
+}
+
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+// Test build only: pretend disk numbers so the exit-8 refusal can run on synthetic files.
+std::vector<DWORD> TestDisks(const char* variable) {
+    std::vector<DWORD> disks;
+    const char* value = getenv(variable);
+    if (value && *value) disks.push_back(static_cast<DWORD>(strtoul(value, nullptr, 10)));
+    return disks;
+}
+#endif
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -423,8 +584,12 @@ int wmain(int argc, wchar_t** argv) {
                  L"       [--skip-size SIZE] [--min-dest-free SIZE] [--max-consecutive-failures N]\n"
                  L"       [--chunk-size SIZE --chunk-dest DIR CAPACITY]... [--lazy-parts]\n"
                  L"       [--source-size SIZE]  (image only the first SIZE bytes)\n"
+                 L"       [--allow-new-source-id]  (resume after the disk's serial changed, e.g. a new\n"
+                 L"        USB adapter; the rescued-data samples must still match)\n"
                  L"exit codes: 0 done, 3 destination low, 4 drive unresponsive, 5 stop requested,\n"
-                 L"            6 refused (would replace an existing image/map/report)\n");
+                 L"            6 refused (would replace an existing image/map/report),\n"
+                 L"            7 refused (--resume found another source than the map's),\n"
+                 L"            8 refused (the output is on the source's own disk)\n");
         return 1;
     }
 
@@ -448,6 +613,7 @@ int wmain(int argc, wchar_t** argv) {
     uint64_t min_dest_free = 0;
     uint64_t source_size_override = 0;
     bool lazy_parts = false;
+    bool allow_new_source_id = false;
     uint64_t max_consecutive_failures = 0;
 
     for (int i = 3; i < argc; ++i) {
@@ -511,6 +677,8 @@ int wmain(int argc, wchar_t** argv) {
             }
         } else if (arg == L"--lazy-parts") {
             lazy_parts = true;
+        } else if (arg == L"--allow-new-source-id") {
+            allow_new_source_id = true;
         } else if (arg == L"--max-consecutive-failures" && i + 1 < argc) {
             const int parsed = _wtoi(argv[++i]);
             if (parsed < 0) { fwprintf(stderr, L"invalid --max-consecutive-failures\n"); return 1; }
@@ -624,6 +792,40 @@ int wmain(int argc, wchar_t** argv) {
     }
     printf("source size: %.2f GB\n", total_size / (1024.0 * 1024.0 * 1024.0));
 
+    // DR5: the output must not land on the disk being rescued (writes there can overwrite the
+    // very sectors we are trying to save). Checked for every destination before anything is
+    // written; a regular-file source (an existing image) has no disk number and is skipped.
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+    const std::vector<DWORD> source_disks = TestDisks("IMAGER_TEST_SOURCE_DISK");
+#else
+    const std::vector<DWORD> source_disks = DiskNumbersOf(src);
+#endif
+    if (!source_disks.empty()) {
+        std::vector<std::wstring> outputs{DestinationDirectory(dest_path)};
+        for (const auto& spec : chunk_destinations) outputs.push_back(spec.root.wstring());
+        for (const auto& output : outputs) {
+#ifdef RECOVERY_REGULAR_FILES_ONLY
+            const std::vector<DWORD> output_disks = TestDisks("IMAGER_TEST_DEST_DISK");
+#else
+            const std::vector<DWORD> output_disks = DiskNumbersOfPath(output);
+#endif
+            if (output_disks.empty()) {
+                fwprintf(stderr, L"warning: could not tell which disk holds %ls\n", output.c_str());
+                continue;
+            }
+            for (DWORD disk : output_disks) {
+                if (std::find(source_disks.begin(), source_disks.end(), disk) != source_disks.end()) {
+                    fwprintf(stderr, L"refusing: %ls is on disk %lu, the same disk as the source; "
+                                     L"pick a destination on another disk. Nothing was written\n",
+                             output.c_str(), static_cast<unsigned long>(disk));
+                    CloseHandle(src);
+                    return kExitDestOnSource;
+                }
+            }
+        }
+    }
+    const std::string source_fingerprint = SourceFingerprint(src);
+
     std::string map_path_narrow = WideToUtf8(dest_path) + ".map";
     if (report_path.empty()) report_path = dest_path + L".report.json";
     const std::string source_identity = WideToUtf8(NormalizedPath(source_path));
@@ -631,6 +833,7 @@ int wmain(int argc, wchar_t** argv) {
 
     recovery::RescueMap map(total_size);
     map.ConfigureIdentity(source_identity, destination_identity, sector_size);
+    map.SetSourceFingerprint(source_fingerprint);
     uint64_t resumed_bytes = 0;
     if (resume) {
         if (map.Load(map_path_narrow)) {
@@ -644,6 +847,59 @@ int wmain(int argc, wchar_t** argv) {
                     map_path_narrow.c_str());
             CloseHandle(src);
             return 1;
+        }
+
+        // DR5: same path is not the same source. A replaced disk (or a file deleted and
+        // recreated at the same path) has another serial/file id; content changed in place is
+        // caught by re-reading a few rescued sectors. Both refuse before the image is opened
+        // for writing, so nothing is mixed into the existing image.
+        const std::string& stored = map.LoadedFingerprint();
+        bool fingerprint_changed = false;
+        if (!stored.empty() && !source_fingerprint.empty() && stored != source_fingerprint) {
+            if (!allow_new_source_id) {
+                fprintf(stderr, "refusing to resume: the map was made from source \"%s\" but this "
+                                "is \"%s\". If it is the same disk behind another adapter, rerun "
+                                "with --allow-new-source-id. Nothing was written\n",
+                        stored.c_str(), source_fingerprint.c_str());
+                CloseHandle(src);
+                return kExitSourceChanged;
+            }
+            fingerprint_changed = true;
+            printf("source id changed (%s -> %s); accepted by --allow-new-source-id if the "
+                   "rescued samples match\n", stored.c_str(), source_fingerprint.c_str());
+        } else if (stored.empty()) {
+            printf("map has no source id yet (older version); recording it now\n");
+        }
+        if (resumed_bytes > 0) {
+            recovery::RandomAccessReader existing;
+            if (!existing.Open(dest_path)) {
+                fprintf(stderr, "could not open the existing image to check it, error %lu\n",
+                        existing.LastErrorCode());
+                CloseHandle(src);
+                return 1;
+            }
+            const SampleCheck samples = CheckRescuedSamples(src, existing, map, sector_size,
+                                                            io_alignment, read_timeout_ms);
+            existing.Close();
+            printf("resume check: %d rescued samples match, %d differ, %d unreadable\n",
+                   samples.matched, samples.mismatched, samples.unreadable);
+            if (samples.mismatched > 0) {
+                fprintf(stderr, "refusing to resume: the source differs from the image at offset "
+                                "%llu, so this is not the source the image was made from. "
+                                "Nothing was written\n",
+                        static_cast<unsigned long long>(samples.first_mismatch));
+                CloseHandle(src);
+                return kExitSourceChanged;
+            }
+            if (fingerprint_changed && samples.matched == 0) {
+                fprintf(stderr, "refusing to resume: the source id changed and no rescued sample "
+                                "could be read to prove it is the same disk. Nothing was written\n");
+                CloseHandle(src);
+                return kExitSourceChanged;
+            }
+            if (samples.unreadable > 0)
+                printf("warning: %d samples could not be read (a weak disk can do that)\n",
+                       samples.unreadable);
         }
     }
 

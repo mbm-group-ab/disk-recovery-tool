@@ -80,6 +80,32 @@ int main() {
     wrong_identity.ConfigureIdentity("source-b", "output-a", 512);
     Check(!wrong_identity.Load(identity_path), "mismatched source identity is rejected");
 
+    // DR5: the source fingerprint is stored but never blocks Load; the imager decides.
+    const std::string fp_path = (dir / "fingerprint.map").string();
+    recovery::RescueMap old_style(4096);
+    old_style.ConfigureIdentity("source-a", "output-a", 512);
+    old_style.MarkRescued(0, 512);
+    Check(old_style.Save(fp_path), "map without fingerprint saves");
+    recovery::RescueMap upgraded(4096);
+    upgraded.ConfigureIdentity("source-a", "output-a", 512);
+    upgraded.SetSourceFingerprint("file:1234:abcd");
+    Check(upgraded.Load(fp_path), "old map without fingerprint still loads");
+    Check(upgraded.LoadedFingerprint().empty(), "old map reports no stored fingerprint");
+    Check(upgraded.SourceFingerprint() == "file:1234:abcd", "current fingerprint is kept");
+    Check(upgraded.Save(fp_path), "upgraded map saves");
+    recovery::RescueMap reread(4096);
+    reread.ConfigureIdentity("source-a", "output-a", 512);
+    reread.SetSourceFingerprint("file:9999:ffff");
+    Check(reread.Load(fp_path), "map with another fingerprint loads (imager refuses it)");
+    Check(reread.LoadedFingerprint() == "file:1234:abcd", "stored fingerprint round-trips");
+    recovery::RescueMap tool_view(4096);
+    Check(tool_view.Load(fp_path), "map tool view loads without identity");
+    Check(tool_view.SourceFingerprint() == "file:1234:abcd", "map tool keeps the stored fingerprint");
+    Check(tool_view.Save(fp_path), "map tool save keeps the map valid");
+    recovery::RescueMap after_tool(4096);
+    Check(after_tool.Load(fp_path) && after_tool.LoadedFingerprint() == "file:1234:abcd",
+          "fingerprint survives a save by a tool that never set it");
+
     fs::remove_all(dir, ec);
     if (failures == 0) std::cout << "all rescue map tests passed\n";
     return failures == 0 ? 0 : 1;

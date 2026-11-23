@@ -35,7 +35,8 @@ TOOL_NAMES = {
     "maptool": "rescue_map_tool" + EXE,
 }
 
-IMAGER_EXIT_MEANING = {3: "exit_3", 4: "exit_4", 5: "exit_5", 6: "exit_6"}
+IMAGER_EXIT_MEANING = {3: "exit_3", 4: "exit_4", 5: "exit_5", 6: "exit_6", 7: "exit_7",
+                       8: "exit_8"}
 
 
 def search_dirs():

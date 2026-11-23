@@ -43,7 +43,18 @@ when `VERSION` in `recovery_gui.py` has no tag yet, after the full test run.
 **Imager exit codes:** 0 done, 3 destination low on space, 4 drive stopped
 answering, 5 stop requested, 6 refused because the image, its map or its
 report already exists (a run without `--resume` never replaces them; move or
-rename them first, or pass `--resume`).
+rename them first, or pass `--resume`), 7 refused to resume because the source
+is not the one the image was made from, 8 refused because the destination is
+on the source's own disk. Nothing is written in cases 6, 7 and 8.
+
+**Resume safety:** the map records what the source is (disk vendor/product/
+serial, or volume serial + file id for an image file). On `--resume` the imager
+refuses another source at the same path, and re-reads 8 small pieces of the
+already-rescued data and compares them with the image, so a disk or file that
+changed is caught too. If the same disk now sits behind another USB adapter and
+reports another serial, add `--allow-new-source-id`; the samples must still
+match. Before writing, it also refuses a destination (or `--chunk-dest`) on the
+disk being rescued.
 
 **Or run from source** (any OS with Python 3; Tkinter ships with standard
 Python on Windows/macOS, on Linux: `sudo apt install python3-tk`):
